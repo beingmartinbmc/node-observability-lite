@@ -1,0 +1,7 @@
+node_modules/
+coverage/
+.idea/
+.cursor/
+.DS_Store
+*.log
+*.tgz
