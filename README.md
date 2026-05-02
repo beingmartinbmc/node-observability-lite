@@ -1,7 +1,11 @@
 # node-observability-lite
 
 [![npm version](https://img.shields.io/npm/v/node-observability-lite.svg)](https://www.npmjs.com/package/node-observability-lite)
+[![npm downloads](https://img.shields.io/npm/dm/node-observability-lite.svg)](https://www.npmjs.com/package/node-observability-lite)
 [![CI](https://github.com/beingmartinbmc/node-observability-lite/actions/workflows/ci.yml/badge.svg)](https://github.com/beingmartinbmc/node-observability-lite/actions/workflows/ci.yml)
+[![Coverage: >=90%](https://img.shields.io/badge/coverage-%3E%3D90%25-brightgreen)](./.github/workflows/ci.yml)
+[![Node >= 18](https://img.shields.io/node/v/node-observability-lite.svg)](https://nodejs.org)
+[![Provenance](https://img.shields.io/badge/npm-provenance-blue?logo=npm)](https://docs.npmjs.com/generating-provenance-statements)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](./LICENSE)
 
 One-line lightweight observability for Node.js. Wires together three small, independent packages so you get health, info, metrics, request timelines, and event-loop watchdog without OpenTelemetry, agents, collectors, or vendor tooling.
@@ -123,6 +127,22 @@ Returns the names of built-in presets.
 - `production` preset disables `env`, `threaddump`, and `heapdump` endpoints.
 - `production` preset requires an `auth` function before any actuator or trace path is served.
 - The auth guard runs before any actuator/trace middleware.
+
+## Supply chain
+
+Releases are published with [npm provenance](https://docs.npmjs.com/generating-provenance-statements) so you can verify the origin of every published version:
+
+```bash
+npm view node-observability-lite --json | jq '.dist'
+```
+
+The release workflow runs on tagged commits in this repository, executes lint/typecheck/coverage gate, and only then publishes to npm with `--provenance --access public`.
+
+See [`SECURITY.md`](./SECURITY.md) for how to report vulnerabilities.
+
+## Contributing
+
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md). Issues and PRs are welcome.
 
 ## License
 
