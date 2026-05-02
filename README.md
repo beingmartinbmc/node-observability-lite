@@ -1,7 +1,11 @@
 # node-observability-lite
 
 [![npm version](https://img.shields.io/npm/v/node-observability-lite.svg)](https://www.npmjs.com/package/node-observability-lite)
+[![npm downloads](https://img.shields.io/npm/dm/node-observability-lite.svg)](https://www.npmjs.com/package/node-observability-lite)
 [![CI](https://github.com/beingmartinbmc/node-observability-lite/actions/workflows/ci.yml/badge.svg)](https://github.com/beingmartinbmc/node-observability-lite/actions/workflows/ci.yml)
+[![Coverage: >=90%](https://img.shields.io/badge/coverage-%3E%3D90%25-brightgreen)](./.github/workflows/ci.yml)
+[![Node >= 18](https://img.shields.io/node/v/node-observability-lite.svg)](https://nodejs.org)
+[![Provenance](https://img.shields.io/badge/npm-provenance-blue?logo=npm)](https://docs.npmjs.com/generating-provenance-statements)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](./LICENSE)
 
 One-line lightweight observability for Node.js. Wires together three small, independent packages so you get health, info, metrics, request timelines, and event-loop watchdog without OpenTelemetry, agents, collectors, or vendor tooling.
@@ -27,7 +31,9 @@ npm install node-observability-lite
 
 > Requires **Node.js >= 18**. Express is an optional peer dependency.
 
-## Quick start (Express)
+## Quick start
+
+### Express
 
 ```js
 const express = require('express');
@@ -45,7 +51,47 @@ app.get('/', (_req, res) => res.json({ ok: true }));
 app.listen(3000);
 ```
 
-That gives you, behind the bearer token:
+### Fastify
+
+```js
+const Fastify = require('fastify');
+const observability = require('node-observability-lite');
+
+const app = Fastify();
+
+await observability.fastify(app, {
+  preset: 'production',
+  auth: (request) => request.headers.authorization === `Bearer ${process.env.OPS_TOKEN}`,
+});
+
+app.get('/', async () => ({ ok: true }));
+
+await app.listen({ port: 3000 });
+```
+
+### Koa
+
+```js
+const Koa = require('koa');
+const observability = require('node-observability-lite');
+
+const app = new Koa();
+
+observability.koa(app, {
+  preset: 'production',
+  auth: (ctx) => ctx.headers.authorization === `Bearer ${process.env.OPS_TOKEN}`,
+});
+
+app.use(async (ctx) => {
+  if (ctx.path === '/') ctx.body = { ok: true };
+});
+
+app.listen(3000);
+```
+
+Runnable versions of all three live under [`examples/`](./examples).
+
+Each gives you, behind the bearer token:
 
 ```
 GET  /actuator
@@ -97,6 +143,14 @@ observability.express(app, {
 
 Mounts the trace middleware, optional auth guard, the actuator middleware, and the trace dashboard router on an Express app, and starts the event-loop watchdog. Returns the underlying actuator instance plus references to the watchdog and trace singletons (or `null` when those are disabled by the resolved preset).
 
+### `observability.fastify(app, options): Promise<{ actuator, watchdog, trace }>`
+
+Registers the trace plugin, an optional `preHandler` auth hook, the actuator plugin, and a `/trace/*` JSON/UI route on a Fastify instance, and starts the event-loop watchdog. Async because Fastify plugin registration is async.
+
+### `observability.koa(app, options): { actuator, watchdog, trace }`
+
+Mounts the Koa trace middleware (after instrumenting the app), an optional auth middleware, the actuator middleware (Express-compatible, wrapped via an internal adapter), and the `/trace/*` route on a Koa app, and starts the event-loop watchdog.
+
 ### `observability.resolveOptions(options): ResolvedOptions`
 
 Resolves a user options object against the chosen preset. Useful for inspection or for plugging the result into a custom integration.
@@ -123,6 +177,24 @@ Returns the names of built-in presets.
 - `production` preset disables `env`, `threaddump`, and `heapdump` endpoints.
 - `production` preset requires an `auth` function before any actuator or trace path is served.
 - The auth guard runs before any actuator/trace middleware.
+
+## Supply chain
+
+Releases are published with [npm provenance](https://docs.npmjs.com/generating-provenance-statements) so you can verify the origin of every published version:
+
+```bash
+npm view node-observability-lite --json | jq '.dist'
+```
+
+The release workflow runs on tagged commits in this repository, executes lint/typecheck/coverage gate, and only then publishes to npm with `--provenance --access public`.
+
+See [`SECURITY.md`](./SECURITY.md) for how to report vulnerabilities.
+
+## Contributing
+
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md). Issues and PRs are welcome.
+
+For deeper documentation on the option shape, custom dependency injection, and shutdown handling, see [`USAGE.md`](./USAGE.md).
 
 ## License
 

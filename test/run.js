@@ -7,6 +7,8 @@ const { resolveOptions } = require('../src/options');
 const { listPresets, getPreset, PRESETS } = require('../src/presets');
 const { buildActuatorOptions } = require('../src/integrations');
 const { express, createGuard } = require('../src/express');
+const { fastify, createFastifyGuard, traceRouterAdapter } = require('../src/fastify');
+const { koa, createKoaGuard, expressToKoa } = require('../src/koa');
 
 // =============================================================================
 // Presets
@@ -376,6 +378,8 @@ describe('public API', () => {
   test('listPresets and resolveOptions are re-exported from index', () => {
     const observability = require('..');
     assert.equal(typeof observability.express, 'function');
+    assert.equal(typeof observability.fastify, 'function');
+    assert.equal(typeof observability.koa, 'function');
     assert.equal(typeof observability.resolveOptions, 'function');
     assert.equal(typeof observability.listPresets, 'function');
     assert.deepEqual(observability.listPresets().sort(), ['development', 'minimal', 'production']);
@@ -389,5 +393,523 @@ describe('public API', () => {
     assert.equal(typeof deps.NodeActuator, 'function');
     assert.equal(typeof deps.watchdog.start, 'function');
     assert.equal(typeof deps.trace.init, 'function');
+  });
+
+  test('public express() resolves options and applies to express via injected deps', () => {
+    const observability = require('..');
+    const app = createMockApp();
+    const deps = createMockDeps();
+
+    const handle = observability.express(app, { preset: 'minimal' }, deps);
+
+    assert.ok(handle.actuator);
+  });
+
+  test('public fastify() resolves options and applies to fastify via injected deps', async () => {
+    const observability = require('..');
+    const app = createMockFastify();
+    const deps = createFastifyDeps();
+
+    const handle = await observability.fastify(app, { preset: 'minimal' }, deps);
+
+    assert.equal(handle.actuator.id, 'mock-actuator');
+  });
+
+  test('public koa() resolves options and applies to koa via injected deps', () => {
+    const observability = require('..');
+    const app = createMockKoa();
+    const deps = createKoaDeps();
+
+    const handle = observability.koa(app, { preset: 'minimal' }, deps);
+
+    assert.equal(handle.actuator.id, 'mock-actuator');
+  });
+});
+
+// =============================================================================
+// Fastify integration
+// =============================================================================
+
+function createMockFastify() {
+  const calls = {
+    plugins: [],
+    hooks: {},
+    routes: [],
+  };
+  const app = {
+    actuator: { id: 'mock-actuator' },
+    register: async (plugin, opts) => {
+      calls.plugins.push({ plugin, opts });
+    },
+    addHook: (name, fn) => {
+      calls.hooks[name] = (calls.hooks[name] || []).concat(fn);
+    },
+    all: (path, fn) => {
+      calls.routes.push({ method: 'ALL', path, fn });
+    },
+    _calls: calls,
+  };
+  return app;
+}
+
+function createFastifyDeps() {
+  const calls = { traceInit: 0, watchdogStart: 0, fastifyPluginInvoked: 0, routesInvoked: 0 };
+  const watchdog = {
+    start: () => { calls.watchdogStart += 1; },
+    getStats: () => ({ avgLag: 0, maxLag: 0, blocksLastMinute: 0 }),
+  };
+  const trace = {
+    init: () => { calls.traceInit += 1; },
+    fastifyPlugin: () => {
+      calls.fastifyPluginInvoked += 1;
+      return function tracePlugin() {};
+    },
+    routes: () => {
+      calls.routesInvoked += 1;
+      return function traceRoutes(_req, _res, next) { next(); };
+    },
+  };
+  const deps = {
+    actuatorPlugin: function actuatorPlugin() {},
+    actuatorMiddleware: () => ({ handler() {}, actuator: {} }),
+    watchdog,
+    trace,
+    _calls: calls,
+  };
+  return deps;
+}
+
+describe('observability.fastify', () => {
+  test('throws when app is not a Fastify-like instance', async () => {
+    const deps = createFastifyDeps();
+    const opts = resolveOptions({ preset: 'minimal' });
+    await assert.rejects(() => fastify({}, opts, deps), /requires a Fastify instance/);
+  });
+
+  test('registers trace plugin, actuator plugin, and trace routes when enabled', async () => {
+    const app = createMockFastify();
+    const deps = createFastifyDeps();
+    const opts = resolveOptions({ preset: 'production', auth: () => true });
+
+    const handle = await fastify(app, opts, deps);
+
+    assert.equal(deps._calls.traceInit, 1);
+    assert.equal(deps._calls.watchdogStart, 1);
+    assert.equal(deps._calls.fastifyPluginInvoked, 1);
+    assert.equal(deps._calls.routesInvoked, 1);
+    // Two register calls: trace plugin + actuator plugin
+    assert.equal(app._calls.plugins.length, 2);
+    // preHandler hook for the auth guard
+    assert.equal(app._calls.hooks.preHandler.length, 1);
+    // Trace router mounted under /trace/*
+    assert.deepEqual(app._calls.routes.map((r) => r.path), ['/trace/*']);
+    assert.equal(handle.actuator.id, 'mock-actuator');
+    assert.equal(handle.watchdog, deps.watchdog);
+    assert.equal(handle.trace, deps.trace);
+  });
+
+  test('skips trace plugin and routes when trace is disabled', async () => {
+    const app = createMockFastify();
+    const deps = createFastifyDeps();
+    const opts = resolveOptions({ preset: 'minimal' });
+
+    const handle = await fastify(app, opts, deps);
+
+    assert.equal(deps._calls.fastifyPluginInvoked, 0);
+    assert.equal(deps._calls.routesInvoked, 0);
+    assert.equal(app._calls.plugins.length, 1);
+    assert.equal(handle.trace, null);
+    assert.equal(handle.watchdog, null);
+  });
+
+  test('skips auth hook when no auth function is provided', async () => {
+    const app = createMockFastify();
+    const deps = createFastifyDeps();
+    const opts = resolveOptions({ preset: 'development' });
+
+    await fastify(app, opts, deps);
+
+    assert.equal(app._calls.hooks.preHandler, undefined);
+  });
+});
+
+// =============================================================================
+// Fastify auth guard
+// =============================================================================
+
+function createFastifyReply() {
+  const reply = {
+    statusCode: 200,
+    body: undefined,
+    code(c) { this.statusCode = c; return this; },
+    send(b) { this.body = b; return this; },
+    header() { return this; },
+  };
+  return reply;
+}
+
+describe('createFastifyGuard', () => {
+  test('passes through when path is not an ops path', async () => {
+    let invoked = 0;
+    const guard = createFastifyGuard({
+      basePath: '/actuator',
+      auth: () => { invoked += 1; return true; },
+    });
+    const reply = createFastifyReply();
+    await guard({ url: '/api/users' }, reply);
+    assert.equal(invoked, 0);
+    assert.equal(reply.statusCode, 200);
+  });
+
+  test('replies 401 when auth returns falsy', async () => {
+    const guard = createFastifyGuard({ basePath: '/actuator', auth: () => false });
+    const reply = createFastifyReply();
+    await guard({ url: '/actuator/health' }, reply);
+    assert.equal(reply.statusCode, 401);
+    assert.deepEqual(reply.body, { error: 'Unauthorized' });
+  });
+
+  test('replies 500 when auth throws', async () => {
+    const guard = createFastifyGuard({
+      basePath: '/actuator',
+      auth: () => { throw new Error('boom'); },
+    });
+    const reply = createFastifyReply();
+    await guard({ url: '/actuator/health' }, reply);
+    assert.equal(reply.statusCode, 500);
+    assert.deepEqual(reply.body, { error: 'Auth handler error' });
+  });
+
+  test('also guards /trace prefix', async () => {
+    const guard = createFastifyGuard({ basePath: '/actuator', auth: () => false });
+    const reply = createFastifyReply();
+    await guard({ url: '/trace/ui' }, reply);
+    assert.equal(reply.statusCode, 401);
+  });
+
+  test('passes when auth returns truthy', async () => {
+    const guard = createFastifyGuard({ basePath: '/actuator', auth: () => true });
+    const reply = createFastifyReply();
+    const result = await guard({ url: '/actuator/health' }, reply);
+    assert.equal(result, undefined);
+    assert.equal(reply.statusCode, 200);
+  });
+
+  test('falls back to request.raw.url when url is missing', async () => {
+    const guard = createFastifyGuard({ basePath: '/actuator', auth: () => false });
+    const reply = createFastifyReply();
+    await guard({ raw: { url: '/actuator/health' } }, reply);
+    assert.equal(reply.statusCode, 401);
+  });
+});
+
+// =============================================================================
+// Trace router adapter (Express -> Fastify)
+// =============================================================================
+
+describe('traceRouterAdapter', () => {
+  test('passes request.raw and response shim into the Express router', async () => {
+    let received;
+    const router = (req, res, next) => {
+      received = { req, res };
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('{"ok":true}');
+      next();
+    };
+    const reply = createFastifyReply();
+    const handler = traceRouterAdapter(router);
+    await handler({ raw: { url: '/trace/recent' } }, reply);
+    assert.ok(received);
+    assert.equal(received.req.url, '/trace/recent');
+    assert.equal(reply.body, '{"ok":true}');
+  });
+
+  test('falls back to 404 when the router does not consume the response', async () => {
+    const router = (_req, _res, next) => next();
+    const reply = createFastifyReply();
+    const handler = traceRouterAdapter(router);
+    await handler({ raw: { url: '/trace/missing' } }, reply);
+    assert.equal(reply.statusCode, 404);
+    assert.deepEqual(reply.body, { error: 'Not found' });
+  });
+
+  test('rejects when the router throws synchronously', async () => {
+    const handler = traceRouterAdapter(() => { throw new Error('boom'); });
+    const reply = createFastifyReply();
+    await assert.rejects(() => handler({ raw: {} }, reply), /boom/);
+  });
+
+  test('shim getHeader returns previously set value', async () => {
+    const router = (_req, res, next) => {
+      res.setHeader('Content-Type', 'text/plain');
+      assert.equal(res.getHeader('Content-Type'), 'text/plain');
+      res.end('ok');
+      next();
+    };
+    const reply = createFastifyReply();
+    const handler = traceRouterAdapter(router);
+    await handler({ raw: {} }, reply);
+    assert.equal(reply.body, 'ok');
+  });
+});
+
+// =============================================================================
+// Koa integration
+// =============================================================================
+
+function createMockKoa() {
+  const stack = [];
+  const app = {
+    _stack: stack,
+    use(mw) { stack.push(mw); return app; },
+  };
+  return app;
+}
+
+function createKoaDeps() {
+  const calls = {
+    traceInit: 0,
+    watchdogStart: 0,
+    instrumentKoa: 0,
+    koaMiddleware: 0,
+    routesInvoked: 0,
+    actuatorMiddleware: 0,
+  };
+  const watchdog = {
+    start: () => { calls.watchdogStart += 1; },
+    getStats: () => ({ avgLag: 0, maxLag: 0, blocksLastMinute: 0 }),
+  };
+  const trace = {
+    init: () => { calls.traceInit += 1; },
+    instrumentKoa: (app) => { calls.instrumentKoa += 1; return app; },
+    koaMiddleware: () => {
+      calls.koaMiddleware += 1;
+      return async function traceKoa(_ctx, next) { return next(); };
+    },
+    routes: () => {
+      calls.routesInvoked += 1;
+      return function traceRoutes(_req, res, _next) {
+        res.statusCode = 200;
+        res.end('routes');
+      };
+    },
+  };
+  const deps = {
+    actuatorMiddleware: () => {
+      calls.actuatorMiddleware += 1;
+      return {
+        handler: function actuatorHandler(_req, res, next) {
+          res.status(200).json({ ok: true });
+          next();
+        },
+        actuator: { id: 'mock-actuator' },
+      };
+    },
+    watchdog,
+    trace,
+    _calls: calls,
+  };
+  return deps;
+}
+
+describe('observability.koa', () => {
+  test('throws when app is not a Koa-like instance', () => {
+    const deps = createKoaDeps();
+    const opts = resolveOptions({ preset: 'minimal' });
+    assert.throws(() => koa({}, opts, deps), /requires a Koa application/);
+  });
+
+  test('mounts trace, guard, actuator, and trace routes when enabled', () => {
+    const app = createMockKoa();
+    const deps = createKoaDeps();
+    const opts = resolveOptions({ preset: 'production', auth: () => true });
+
+    const handle = koa(app, opts, deps);
+
+    assert.equal(deps._calls.traceInit, 1);
+    assert.equal(deps._calls.watchdogStart, 1);
+    assert.equal(deps._calls.instrumentKoa, 1);
+    assert.equal(deps._calls.koaMiddleware, 1);
+    assert.equal(deps._calls.actuatorMiddleware, 1);
+    assert.equal(deps._calls.routesInvoked, 1);
+    // trace + guard + actuator-adapter + trace-routes-adapter
+    assert.equal(app._stack.length, 4);
+    assert.equal(handle.actuator.id, 'mock-actuator');
+    assert.equal(handle.watchdog, deps.watchdog);
+    assert.equal(handle.trace, deps.trace);
+  });
+
+  test('skips trace integration when disabled', () => {
+    const app = createMockKoa();
+    const deps = createKoaDeps();
+    const opts = resolveOptions({ preset: 'minimal' });
+
+    const handle = koa(app, opts, deps);
+
+    assert.equal(deps._calls.instrumentKoa, 0);
+    assert.equal(deps._calls.koaMiddleware, 0);
+    assert.equal(deps._calls.routesInvoked, 0);
+    // only actuator-adapter
+    assert.equal(app._stack.length, 1);
+    assert.equal(handle.trace, null);
+  });
+
+  test('skips guard middleware when no auth is provided', () => {
+    const app = createMockKoa();
+    const deps = createKoaDeps();
+    const opts = resolveOptions({ preset: 'development' });
+
+    koa(app, opts, deps);
+
+    // trace + actuator + trace-routes (no guard)
+    assert.equal(app._stack.length, 3);
+  });
+});
+
+// =============================================================================
+// Koa auth guard
+// =============================================================================
+
+function createKoaCtx(path) {
+  const ctx = {
+    method: 'GET',
+    path,
+    url: path,
+    originalUrl: path,
+    query: {},
+    headers: {},
+    status: 200,
+    body: undefined,
+    type: undefined,
+    response: { get() { return undefined; } },
+    set() {},
+    get() { return undefined; },
+  };
+  return ctx;
+}
+
+describe('createKoaGuard', () => {
+  test('non-ops paths pass through without invoking auth', async () => {
+    let invoked = 0;
+    const guard = createKoaGuard({
+      basePath: '/actuator',
+      auth: () => { invoked += 1; return true; },
+    });
+    const ctx = createKoaCtx('/api/users');
+    let nextCalled = false;
+    await guard(ctx, async () => { nextCalled = true; });
+    assert.equal(invoked, 0);
+    assert.equal(nextCalled, true);
+  });
+
+  test('passes when auth returns truthy', async () => {
+    const guard = createKoaGuard({ basePath: '/actuator', auth: () => true });
+    const ctx = createKoaCtx('/actuator/health');
+    let nextCalled = false;
+    await guard(ctx, async () => { nextCalled = true; });
+    assert.equal(nextCalled, true);
+  });
+
+  test('returns 401 when auth returns falsy', async () => {
+    const guard = createKoaGuard({ basePath: '/actuator', auth: () => false });
+    const ctx = createKoaCtx('/actuator/health');
+    await guard(ctx, async () => { throw new Error('next should not run'); });
+    assert.equal(ctx.status, 401);
+    assert.deepEqual(ctx.body, { error: 'Unauthorized' });
+  });
+
+  test('returns 500 when auth throws', async () => {
+    const guard = createKoaGuard({
+      basePath: '/actuator',
+      auth: () => { throw new Error('boom'); },
+    });
+    const ctx = createKoaCtx('/actuator/health');
+    await guard(ctx, async () => { throw new Error('next should not run'); });
+    assert.equal(ctx.status, 500);
+    assert.deepEqual(ctx.body, { error: 'Auth handler error' });
+  });
+
+  test('also guards /trace prefix', async () => {
+    const guard = createKoaGuard({ basePath: '/actuator', auth: () => false });
+    const ctx = createKoaCtx('/trace/ui');
+    await guard(ctx, async () => { throw new Error('next should not run'); });
+    assert.equal(ctx.status, 401);
+  });
+});
+
+// =============================================================================
+// expressToKoa adapter
+// =============================================================================
+
+describe('expressToKoa', () => {
+  test('skips wrapped handler when path does not match prefixes', async () => {
+    const handler = () => { throw new Error('should not run'); };
+    const adapter = expressToKoa(handler, '/actuator');
+    const ctx = createKoaCtx('/api/users');
+    let nextCalled = false;
+    await adapter(ctx, async () => { nextCalled = true; });
+    assert.equal(nextCalled, true);
+  });
+
+  test('invokes the wrapped handler and consumes via shim.json', async () => {
+    const handler = (_req, res, next) => {
+      res.status(202).json({ ok: true });
+      next();
+    };
+    const adapter = expressToKoa(handler, '/actuator');
+    const ctx = createKoaCtx('/actuator/health');
+    await adapter(ctx, async () => { throw new Error('next should not run when consumed'); });
+    assert.equal(ctx.status, 202);
+    assert.deepEqual(ctx.body, { ok: true });
+    assert.equal(ctx.type, 'application/json');
+  });
+
+  test('sets content-type via shim.set then send', async () => {
+    const handler = (_req, res, next) => {
+      res.set('Content-Type', 'text/plain; charset=utf-8');
+      res.status(200).send('hello');
+      next();
+    };
+    const adapter = expressToKoa(handler, '/actuator');
+    const ctx = createKoaCtx('/actuator/prometheus');
+    await adapter(ctx, async () => { throw new Error('next should not run'); });
+    assert.equal(ctx.body, 'hello');
+    assert.equal(ctx.type, 'text/plain; charset=utf-8');
+  });
+
+  test('falls through to next when handler does not consume', async () => {
+    const handler = (_req, _res, next) => next();
+    const adapter = expressToKoa(handler, '/actuator');
+    const ctx = createKoaCtx('/actuator/missing');
+    let nextCalled = false;
+    await adapter(ctx, async () => { nextCalled = true; });
+    assert.equal(nextCalled, true);
+  });
+
+  test('rejects when handler invokes next with an error', async () => {
+    const handler = (_req, _res, next) => next(new Error('boom'));
+    const adapter = expressToKoa(handler, '/actuator');
+    const ctx = createKoaCtx('/actuator/anything');
+    await assert.rejects(() => adapter(ctx, async () => {}), /boom/);
+  });
+
+  test('writeHead + end pipe through shim', async () => {
+    const handler = (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('ok');
+    };
+    const adapter = expressToKoa(handler, '/trace');
+    const ctx = createKoaCtx('/trace/recent');
+    await adapter(ctx, async () => { throw new Error('next should not run'); });
+    assert.equal(ctx.status, 200);
+    assert.equal(ctx.body, 'ok');
+  });
+
+  test('runs always when no prefixes are supplied', async () => {
+    const handler = (_req, res, next) => { res.status(200).json({}); next(); };
+    const adapter = expressToKoa(handler);
+    const ctx = createKoaCtx('/anything');
+    await adapter(ctx, async () => { throw new Error('next should not run when consumed'); });
+    assert.equal(ctx.status, 200);
   });
 });

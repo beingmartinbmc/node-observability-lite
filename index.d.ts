@@ -54,6 +54,8 @@ declare namespace observability {
 
 declare const observability: {
   express(app: any, options?: observability.ObservabilityOptions, deps?: any): observability.ObservabilityHandle;
+  fastify(app: any, options?: observability.ObservabilityOptions, deps?: any): Promise<observability.ObservabilityHandle>;
+  koa(app: any, options?: observability.ObservabilityOptions, deps?: any): observability.ObservabilityHandle;
   resolveOptions(options?: observability.ObservabilityOptions): observability.ResolvedObservabilityOptions;
   listPresets(): observability.PresetName[];
 };
