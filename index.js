@@ -2,6 +2,8 @@
 
 const { resolveOptions } = require('./src/options');
 const { express: applyToExpress } = require('./src/express');
+const { fastify: applyToFastify } = require('./src/fastify');
+const { koa: applyToKoa } = require('./src/koa');
 const { listPresets } = require('./src/presets');
 
 /**
@@ -38,8 +40,43 @@ function express(app, options, dependencies) {
   return applyToExpress(app, opts, deps);
 }
 
+/**
+ * One-line setup for a Fastify app.
+ *
+ *   const fastify = require('fastify')();
+ *   const observability = require('node-observability-lite');
+ *   await observability.fastify(fastify, {
+ *     preset: 'production',
+ *     auth: req => req.headers.authorization === `Bearer ${process.env.OPS_TOKEN}`,
+ *   });
+ */
+async function fastify(app, options, dependencies) {
+  const opts = resolveOptions(options);
+  const deps = dependencies || defaultDeps();
+  return applyToFastify(app, opts, deps);
+}
+
+/**
+ * One-line setup for a Koa app.
+ *
+ *   const Koa = require('koa');
+ *   const observability = require('node-observability-lite');
+ *   const app = new Koa();
+ *   observability.koa(app, {
+ *     preset: 'production',
+ *     auth: ctx => ctx.headers.authorization === `Bearer ${process.env.OPS_TOKEN}`,
+ *   });
+ */
+function koa(app, options, dependencies) {
+  const opts = resolveOptions(options);
+  const deps = dependencies || defaultDeps();
+  return applyToKoa(app, opts, deps);
+}
+
 module.exports = {
   express,
+  fastify,
+  koa,
   resolveOptions,
   listPresets,
 };

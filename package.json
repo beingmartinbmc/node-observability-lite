@@ -1,6 +1,6 @@
 {
   "name": "node-observability-lite",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "One-line lightweight observability for Node.js: actuator endpoints, request timelines, and event-loop watchdog without OpenTelemetry",
   "main": "index.js",
   "types": "index.d.ts",
@@ -13,9 +13,11 @@
     "index.d.ts",
     "src/",
     "README.md",
+    "USAGE.md",
     "LICENSE",
     "CHANGELOG.md",
     "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
     "SECURITY.md"
   ],
   "scripts": {
@@ -36,6 +38,8 @@
     "metrics",
     "prometheus",
     "express",
+    "fastify",
+    "koa",
     "ecosystem",
     "lightweight"
   ],
@@ -50,10 +54,18 @@
     "node-request-trace": "^2.2.0"
   },
   "peerDependencies": {
-    "express": ">=4.0.0"
+    "express": ">=4.0.0",
+    "fastify": ">=4.0.0",
+    "koa": ">=2.0.0"
   },
   "peerDependenciesMeta": {
     "express": {
+      "optional": true
+    },
+    "fastify": {
+      "optional": true
+    },
+    "koa": {
       "optional": true
     }
   },
