@@ -1,6 +1,6 @@
 {
   "name": "node-observability-lite",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "One-line lightweight observability for Node.js: actuator endpoints, request timelines, and event-loop watchdog without OpenTelemetry",
   "main": "index.js",
   "types": "index.d.ts",
@@ -27,6 +27,9 @@
     "test": "node test/run.js",
     "test:coverage": "c8 --reporter=text --reporter=html node test/run.js",
     "test:coverage:check": "c8 --check-coverage --lines 90 --functions 90 --branches 90 --statements 90 --reporter=text node test/run.js",
+    "smoke:express": "node scripts/smoke.js express 3000",
+    "smoke:fastify": "node scripts/smoke.js fastify 3001",
+    "smoke:koa": "node scripts/smoke.js koa 3002",
     "prepublishOnly": "npm run lint && npm run typecheck && npm run test:coverage:check"
   },
   "keywords": [

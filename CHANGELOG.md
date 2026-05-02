@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## Unreleased
 
+## 0.2.1 - 2026-05-02
+
+### Fixed
+
+- `/actuator/eventloop`, `/actuator/eventloop/history`, `/actuator/eventloop/hotspots`, and `/actuator/eventloop/metrics` are now reachable on Express, Fastify, and Koa. The 0.2.0 release transitively pulled `node-eventloop-watchdog@1.1.0` which registered watchdog endpoints with the wrong id (`actuator/eventloop` instead of `eventloop`); 0.2.1 resolves `node-eventloop-watchdog@^1.1.1` and `node-actuator-lite@^3.2.1`, both of which include the upstream fixes. See `node-eventloop-watchdog#6` and `node-actuator-lite#8`.
+
+### Added
+
+- CI now runs an end-to-end smoke test job that boots the Express, Fastify, and Koa example apps and hits their actuator and trace endpoints. Catches regressions in the meta-package against the real downstream packages.
+- `scripts/smoke.js` and `npm run smoke:{express,fastify,koa}` for running the same checks locally.
+
+### Changed
+
+- Workflows opt into the Node 24 actions runtime via `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` to silence the `actions/checkout@v4` and `actions/setup-node@v4` Node 20 deprecation warning.
+
+
 ## 0.2.0 - 2026-05-02
 
 ### Added
