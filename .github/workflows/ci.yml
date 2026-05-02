@@ -10,6 +10,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   test:
     name: Test (Node ${{ matrix.node }})
@@ -47,3 +50,31 @@ jobs:
       - name: Package dry run
         if: matrix.node == '20'
         run: npm run build
+
+  smoke:
+    name: Smoke (Express/Fastify/Koa)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install
+        run: npm install
+
+      - name: Install peer frameworks for smoke
+        run: npm install --no-save express fastify koa
+
+      - name: Smoke Express
+        run: npm run smoke:express
+
+      - name: Smoke Fastify
+        run: npm run smoke:fastify
+
+      - name: Smoke Koa
+        run: npm run smoke:koa
