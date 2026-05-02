@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { test, suite } = require('node:test');
+const { test, describe } = require('node:test');
 
 const { resolveOptions } = require('../src/options');
 const { listPresets, getPreset, PRESETS } = require('../src/presets');
@@ -12,7 +12,7 @@ const { express, createGuard } = require('../src/express');
 // Presets
 // =============================================================================
 
-suite('presets', () => {
+describe('presets', () => {
   test('listPresets returns all built-in presets', () => {
     assert.deepEqual(listPresets().sort(), ['development', 'minimal', 'production']);
   });
@@ -57,7 +57,7 @@ suite('presets', () => {
 // Options resolution
 // =============================================================================
 
-suite('resolveOptions', () => {
+describe('resolveOptions', () => {
   test('throws when options is not an object', () => {
     assert.throws(() => resolveOptions(42), /Options must be an object/);
   });
@@ -162,7 +162,7 @@ function createMockDeps() {
   return deps;
 }
 
-suite('buildActuatorOptions', () => {
+describe('buildActuatorOptions', () => {
   test('initialises trace and watchdog when enabled', () => {
     const deps = createMockDeps();
     const opts = resolveOptions({ preset: 'production', auth: () => true });
@@ -249,7 +249,7 @@ function createMockApp() {
   };
 }
 
-suite('observability.express', () => {
+describe('observability.express', () => {
   test('throws when app is not an Express-like object', () => {
     const deps = createMockDeps();
     assert.throws(
@@ -310,7 +310,7 @@ function createReqRes(path) {
   return { req, res, calls };
 }
 
-suite('createGuard', () => {
+describe('createGuard', () => {
   test('passes through non-ops paths without invoking auth', () => {
     let invoked = 0;
     const guard = createGuard({
@@ -372,7 +372,7 @@ suite('createGuard', () => {
 // Public API surface
 // =============================================================================
 
-suite('public API', () => {
+describe('public API', () => {
   test('listPresets and resolveOptions are re-exported from index', () => {
     const observability = require('..');
     assert.equal(typeof observability.express, 'function');
