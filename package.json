@@ -13,7 +13,10 @@
     "index.d.ts",
     "src/",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md"
   ],
   "scripts": {
     "lint": "sh -c 'for f in index.js src/*.js test/run.js; do node --check \"$f\"; done'",
